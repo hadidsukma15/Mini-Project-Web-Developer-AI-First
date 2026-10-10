@@ -1,0 +1,53 @@
+:root {
+  --color-bg: #ffffff;
+  --color-surface: #f6f5f3;
+  --color-surface-dark: #111111;
+  --color-text: #111111;
+  --color-text-muted: #5c5c5c;
+  --color-border: #e3e1de;
+  --color-accent: #111111;
+  --color-focus: #1d4ed8;
+  --color-success: #166534;
+  --color-danger: #b42318;
+  --color-disabled-bg: #e6e4e1;
+  --color-disabled-text: #767676;
+
+  --font-sans: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+
+  --fs-display: clamp(2rem, 3.2vw, 3rem);
+  --fs-h2: clamp(1.5rem, 2.4vw, 2rem);
+  --fs-h3: 1.125rem;
+  --fs-body: 1rem;
+  --fs-small: 0.875rem;
+  --fs-xs: 0.75rem;
+  --fs-price: clamp(1.25rem, 1.6vw, 1.5rem);
+  --fs-eyebrow: 0.75rem;
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 80px;
+
+  --section-padding-y: 80px;
+  --container-max: 1280px;
+  --container-pad: 24px;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-pill: 999px;
+  --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-soft: 0 2px 10px rgba(0, 0, 0, 0.08);
+
+  --gap-hero: 48px;
+  --tap-target: 44px;
+  --header-height: 72px;
+}

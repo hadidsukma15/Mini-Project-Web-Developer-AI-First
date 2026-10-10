@@ -1,0 +1,1386 @@
+openapi: 3.0.3
+info:
+  title: API Produk
+  version: 1.0.0
+  description: |
+    API katalog produk — **Node.js + Express + MySQL 8**.
+
+    ## Konvensi respons
+    | Kondisi | `Content-Type` | Bentuk body |
+    |---------|----------------|-------------|
+    | Sukses (GET/POST/PUT) | `application/json; charset=utf-8` | Envelope `{ "data": <produk> }` |
+    | Sukses (list) | `application/json; charset=utf-8` | `{ "data": [...], "meta": { total, limit, offset } }` |
+    | Sukses (DELETE) | — | `204 No Content` tanpa body |
+    | **Gagal** | `application/problem+json; charset=utf-8` | **RFC 9457 Problem Details**: `type`, `title`, `status`, `detail`, `instance` + ekstensi `code` dan `errors[]` (bila terkait field) |
+
+    ## Perilaku
+    - **Method di luar daftar** pada path ini → `405` + header `Allow` (lihat `MethodNotAllowed`).
+    - **Path tak dikenal** → `404` dengan `code = NOT_FOUND`.
+    - Urutan validasi: `415`/`400`/`409` **sebelum** `404`.
+    - Skema DB minimal (nama, harga, foto, variasi warna+jumlah, deskripsi) → field `category`, `availability`, `specs[]`, `usps[]`, `inTheBox[]` **belum ada** (roadmap: `context/architecture.md` §14).
+    - Rujukan kontrak lengkap: `context/prd.md` §8 · Skema DB: `context/architecture.md` §5.
+  contact:
+    name: Product Owner (exercise)
+servers:
+  - url: http://localhost:3000
+    description: Lokal (dev)
+tags:
+  - name: products
+    description: Operasi katalog produk (CRUD)
+  - name: cart
+    description: Keranjang belanja (per cart token, tanpa autentikasi)
+  - name: orders
+    description: Pesanan hasil checkout — CRD (buat, lihat, ubah status, hapus)
+  - name: system
+    description: Health check & monitoring
+paths:
+  /health:
+    get:
+      tags: [system]
+      summary: Health check aplikasi & database
+      operationId: healthCheck
+      description: Memeriksa ketersediaan aplikasi dan koneksi ke database MySQL.
+      responses:
+        '200':
+          description: Aplikasi dan database terhubung dengan baik
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, db]
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  db:
+                    type: string
+                    example: connected
+        '503':
+          description: Database tidak terhubung / degraded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, db]
+                properties:
+                  status:
+                    type: string
+                    example: degraded
+                  db:
+                    type: string
+                    example: disconnected
+  /api/products:
+    get:
+      tags: [products]
+      summary: Daftar produk (list + paginasi)
+      operationId: listProducts
+      description: |
+        Query selalu **string** di Express — dikonversi & divalidasi ketat.
+        Param tak dikenal (mis. `?foo=1`) **diabaikan** (V6).
+        `search` cocokkan case-insensitive ke `id` dan `name`.
+      parameters:
+        - $ref: '#/components/parameters/search'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+      responses:
+        '200':
+          description: Daftar produk (projection ringan — tanpa `description`/`variants`/`images`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListResponse'
+              example:
+                data:
+                  - id: mw75-tumi
+                    name: MW75 TUMI
+                    price: 750
+                    currency: USD
+                meta:
+                  total: 1
+                  limit: 5
+                  offset: 0
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [products]
+      summary: Buat produk baru
+      operationId: createProduct
+      description: |
+        Wajib `Content-Type: application/json` (selain itu `415`).
+        `id` wajib unik di collection → bentrok `409 DUPLICATE_ID`.
+        `variants[].color` wajib unik dalam satu produk → bentrok `400`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductInput'
+            example:
+              id: mw75-tumi-air
+              name: MW75 TUMI Air
+              price: 650
+              description: Varian ringan MW75 dengan baterai hingga 30 jam dan bahan aluminium.
+              variants:
+                - color: Black
+                  swatch: '#1b1b1b'
+                  quantity: 25
+              images:
+                - url: /img/black-hero.png
+                  alt: MW75 Air Black — three-quarter view
+                  color: Black
+      responses:
+        '201':
+          description: Produk dibuat
+          headers:
+            Location:
+              schema:
+                type: string
+              example: /api/products/mw75-tumi-air
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/products/{id}:
+    parameters:
+      - $ref: '#/components/parameters/idPath'
+    get:
+      tags: [products]
+      summary: Detail satu produk
+      operationId: getProductById
+      description: |
+        Payload lengkap: identitas, harga, deskripsi, foto, dan variasi (warna + jumlah).
+        `HEAD` didukung otomatis oleh Express (header sama, tanpa body).
+      responses:
+        '200':
+          description: Detail produk
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductEnvelope'
+              example:
+                data:
+                  id: mw75-tumi
+                  name: MW75 TUMI
+                  price: 750
+                  currency: USD
+                  description: TUMI x Master & Dynamic MW75 — headphone nirkabel dengan active noise-cancelling, bahan lambskin leather dan aluminium anodized, baterai hingga 32 jam.
+                  images:
+                    - url: /img/black-hero.png
+                      alt: TUMI MW75 Black — three-quarter view
+                      color: Black
+                    - url: /img/silver-hero.png
+                      alt: TUMI MW75 Silver — three-quarter view
+                      color: Silver
+                  variants:
+                    - color: Black
+                      swatch: '#1b1b1b'
+                      quantity: 12
+                    - color: Silver
+                      swatch: '#c0c0c0'
+                      quantity: 0
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/ProductNotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [products]
+      summary: Update produk (full-replace)
+      operationId: updateProduct
+      description: |
+        **Full-replace** — body adalah produk lengkap (`ProductInput`), bukan patch.
+        `body.id` wajib **sama persis** dengan path `id` → beda `400` dengan `errors[0].field = "id"`.
+        Varian & foto lama diganti seluruhnya (transaksional).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductInput'
+      responses:
+        '200':
+          description: Produk ter-update
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/ProductNotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [products]
+      summary: Hapus produk
+      operationId: deleteProduct
+      description: |
+        Sukses → `204 No Content` (tanpa body, tanpa envelope).
+        Varian & foto ikut terhapus (FK `ON DELETE CASCADE`).
+        Hapus dua kali → `404 PRODUCT_NOT_FOUND`.
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/ProductNotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/cart/items:
+    post:
+      tags: [cart]
+      summary: Tambah item ke cart
+      operationId: addCartItem
+      description: |
+        Menambah (atau menggabung) satu item ke cart milik `cartToken`.
+        Item dengan `productId` + `color` yang sama **digabung** (quantity dijumlah),
+        bukan baris baru. Cart dibuat otomatis bila belum ada.
+        Dibatasi stok varian: jumlah gabungan melebihi `variants[].quantity` → `409 INSUFFICIENT_STOCK`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CartInput'
+            example:
+              cartToken: 550e8400-e29b-41d4-a716-446655440000
+              productId: mw75-tumi
+              color: Black
+              quantity: 1
+      responses:
+        '200':
+          description: Cart terbaru (termasuk item yang baru ditambah)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartEnvelope'
+              example:
+                data:
+                  cartToken: 550e8400-e29b-41d4-a716-446655440000
+                  currency: USD
+                  count: 1
+                  subtotal: 750
+                  items:
+                    - id: 1
+                      productId: mw75-tumi
+                      name: MW75 TUMI
+                      color: Black
+                      quantity: 1
+                      unitPrice: 750
+                      lineTotal: 750
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/VariantNotFound'
+        '409':
+          $ref: '#/components/responses/InsufficientStock'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/cart/{cartToken}:
+    parameters:
+      - $ref: '#/components/parameters/cartTokenPath'
+    get:
+      tags: [cart]
+      summary: Ambil isi cart
+      operationId: getCart
+      description: |
+        Mengembalikan isi cart beserta `count` (total jumlah item) dan `subtotal`.
+        Token yang belum pernah dipakai menghasilkan cart **kosong** (`200`) —
+        pembuatan baris terjadi saat pertama kali `POST /api/cart/items`.
+        `HEAD` didukung otomatis oleh Express.
+      responses:
+        '200':
+          description: Isi cart (bisa kosong)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [cart]
+      summary: Kosongkan cart
+      operationId: clearCart
+      description: |
+        Menghapus seluruh item milik `cartToken` (baris `carts` dibiarkan).
+        Sukses → `200` dengan cart kosong (bukan 204 — klien perlu state cart terbaru).
+        Cart yang sudah kosong tetap `200` (idempoten).
+      responses:
+        '200':
+          description: Cart kosong
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/cart/{cartToken}/items/{itemId}:
+    parameters:
+      - $ref: '#/components/parameters/cartTokenPath'
+      - $ref: '#/components/parameters/itemIdPath'
+    patch:
+      tags: [cart]
+      summary: Ubah jumlah satu item cart
+      operationId: updateCartItem
+      description: |
+        Mengganti `quantity` satu item (bukan increment). Masih dibatasi stok varian.
+        Item bukan milik `cartToken` → `404 CART_ITEM_NOT_FOUND`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CartItemUpdate'
+            example:
+              quantity: 3
+      responses:
+        '200':
+          description: Cart terbaru
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/CartItemNotFound'
+        '409':
+          $ref: '#/components/responses/InsufficientStock'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [cart]
+      summary: Hapus satu item cart
+      operationId: removeCartItem
+      description: Menghapus satu baris item. Item tidak ada / bukan milik token → `404 CART_ITEM_NOT_FOUND`.
+      responses:
+        '200':
+          description: Cart terbaru setelah item dihapus
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/CartItemNotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/orders:
+    get:
+      tags: [orders]
+      summary: Daftar pesanan (list + paginasi)
+      operationId: listOrders
+      description: |
+        Mengembalikan pesanan terbaru (urut `created_at` DESC) **beserta item-nya**
+        (nama, warna, harga satuan, jumlah — snapshot saat pesanan dibuat).
+        Filter opsional: `cartToken` (pesanan milik satu cart) dan `status`.
+      parameters:
+        - $ref: '#/components/parameters/orderCartTokenQuery'
+        - $ref: '#/components/parameters/orderStatusQuery'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+      responses:
+        '200':
+          description: Daftar pesanan + meta paginasi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderListResponse'
+              example:
+                data:
+                  - id: 1
+                    orderNumber: MD-261008-3F9C2A
+                    cartToken: 550e8400-e29b-41d4-a716-446655440000
+                    status: pending
+                    currency: USD
+                    customerName: Budi Santoso
+                    email: budi@example.com
+                    note: null
+                    itemsCount: 2
+                    subtotal: 1500
+                    total: 1500
+                    items:
+                      - id: 1
+                        productId: mw75-tumi
+                        name: MW75 TUMI
+                        color: Black
+                        quantity: 2
+                        unitPrice: 750
+                        lineTotal: 1500
+                    createdAt: '2026-10-08T02:30:00.000Z'
+                    updatedAt: '2026-10-08T02:30:00.000Z'
+                meta:
+                  total: 1
+                  limit: 20
+                  offset: 0
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [orders]
+      summary: Buat pesanan dari isi cart (checkout)
+      operationId: createOrder
+      description: |
+        Mengubah isi cart milik `cartToken` menjadi pesanan dalam **satu transaksi**:
+
+        1. Cart kosong → `409 CART_EMPTY`.
+        2. Stok tiap varian divalidasi lalu **dikurangi** (melebihi stok → `409 INSUFFICIENT_STOCK`).
+        3. Nama & harga produk di-*snapshot* ke `order_items` (riwayat tidak ikut berubah).
+        4. Cart dikosongkan.
+
+        Sukses → `201` + header `Location: /api/orders/{id}`. Nomor pesanan (`orderNumber`)
+        dibuat otomatis: `MD-YYMMDD-XXXXXX`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderInput'
+            example:
+              cartToken: 550e8400-e29b-41d4-a716-446655440000
+              customerName: Budi Santoso
+              email: budi@example.com
+              note: Tolong dibungkus rapi
+      responses:
+        '201':
+          description: Pesanan dibuat (Location ke /api/orders/{id})
+          headers:
+            Location:
+              description: URL detail pesanan yang baru dibuat.
+              schema:
+                type: string
+                example: /api/orders/1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/VariantNotFound'
+        '409':
+          description: '`409` — cart kosong (`CART_EMPTY`) atau stok tidak cukup (`INSUFFICIENT_STOCK`).'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              example:
+                type: /problems/cart-empty
+                title: Cart Empty
+                status: 409
+                detail: Cart '550e8400-e29b-41d4-a716-446655440000' kosong — tambahkan item sebelum membuat pesanan
+                instance: /api/orders
+                code: CART_EMPTY
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/orders/{orderId}:
+    parameters:
+      - $ref: '#/components/parameters/orderIdPath'
+    get:
+      tags: [orders]
+      summary: Detail pesanan (termasuk item yang dipesan)
+      operationId: getOrder
+      description: Mengembalikan satu pesanan lengkap dengan `items[]`. Id tidak ada → `404 ORDER_NOT_FOUND`.
+      responses:
+        '200':
+          description: Detail pesanan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      tags: [orders]
+      summary: Ubah pesanan (status / identitas pembeli)
+      operationId: updateOrder
+      description: |
+        Perubahan sebagian (minimal satu field). Efek stok saat **status** berubah:
+
+        - masuk `cancelled` → stok varian pada pesanan **dikembalikan**;
+        - keluar `cancelled` → stok **divalidasi & dikurangi lagi** (kurang → `409 INSUFFICIENT_STOCK`);
+        - status lain (`pending`/`paid`/`shipped`/`delivered`) → tanpa efek stok.
+
+        Item pesanan tidak bisa diubah (snapshot riwayat) — gunakan `DELETE` bila perlu membatalkan permanen.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderUpdate'
+            example:
+              status: shipped
+      responses:
+        '200':
+          description: Pesanan terbaru
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '409':
+          $ref: '#/components/responses/InsufficientStock'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [orders]
+      summary: Hapus pesanan
+      operationId: deleteOrder
+      description: |
+        Hard delete — baris `order_items` ikut terhapus (FK CASCADE).
+        Stok varian **dikembalikan** bila pesanan belum `cancelled` (pembatalan lewat status
+        menyimpan riwayat & tidak mengembalikan stok otomatis). Sukses → `204` tanpa body.
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  parameters:
+    idPath:
+      name: id
+      in: path
+      required: true
+      description: |
+        "Slug produk — pola ^[a-z0-9](?:[a-z0-9-]{1,48}[a-z0-9])?$"
+        (huruf kecil, angka, tanda hubung; tanpa `-` di awal/akhir; maks 50 karakter).
+      schema:
+        type: string
+        pattern: "^[a-z0-9](?:[a-z0-9-]{1,48}[a-z0-9])?$"
+        minLength: 1
+        maxLength: 50
+      example: mw75-tumi
+    cartTokenPath:
+      name: cartToken
+      in: path
+      required: true
+      description: |
+        Token cart berupa UUID v4 yang dipegang client (localStorage) — tanpa autentikasi.
+        Pola: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" (case-insensitive).
+      schema:
+        type: string
+        format: uuid
+        pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      example: 550e8400-e29b-41d4-a716-446655440000
+    itemIdPath:
+      name: itemId
+      in: path
+      required: true
+      description: Id baris `cart_items` (bigint positif).
+      schema:
+        type: integer
+        minimum: 1
+        example: 1
+    orderIdPath:
+      name: orderId
+      in: path
+      required: true
+      description: Id baris `orders` (bigint positif).
+      schema:
+        type: integer
+        minimum: 1
+        example: 1
+    orderCartTokenQuery:
+      name: cartToken
+      in: query
+      required: false
+      description: Filter pesanan milik cart token tertentu (UUID).
+      schema:
+        type: string
+        format: uuid
+        pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      example: 550e8400-e29b-41d4-a716-446655440000
+    orderStatusQuery:
+      name: status
+      in: query
+      required: false
+      description: Filter status pesanan.
+      schema:
+        type: string
+        enum: [pending, paid, shipped, delivered, cancelled]
+      example: pending
+    search:
+      name: search
+      in: query
+      required: false
+      description: Filter teks 1–100 karakter — cocokkan case-insensitive ke `id` dan `name`.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 100
+      example: mw75
+    limit:
+      name: limit
+      in: query
+      required: false
+      description: Jumlah item per halaman (integer murni 1–100, default 10).
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 10
+      example: 5
+    offset:
+      name: offset
+      in: query
+      required: false
+      description: Jumlah item yang dilewati (integer ≥ 0, default 0).
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+      example: 0
+  headers:
+    Allow:
+      description: Daftar method yang didukung path ini.
+      schema:
+        type: string
+      example: GET, HEAD, PUT, DELETE, OPTIONS
+  schemas:
+    Variant:
+      type: object
+      additionalProperties: false
+      required: [color, quantity]
+      properties:
+        color:
+          type: string
+          minLength: 1
+          maxLength: 30
+          description: Nama warna — unik per produk.
+          example: Black
+        swatch:
+          type: string
+          nullable: true
+          pattern: '^#[0-9A-Fa-f]{6}$'
+          description: Warna heksadesimal untuk swatch UI (opsional, bisa `null`).
+          example: '#1b1b1b'
+        quantity:
+          type: integer
+          minimum: 0
+          description: Jumlah stok varian ini.
+          example: 12
+    Image:
+      type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        url:
+          type: string
+          maxLength: 500
+          pattern: '^(https?://|/)'
+          description: Path relatif (`/img/...`) atau URL absolut (`https://...`).
+          example: /img/black-hero.png
+        alt:
+          type: string
+          maxLength: 160
+          default: ''
+          description: Teks alternatif gambar (a11y).
+          example: TUMI MW75 Black — three-quarter view
+        color:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 30
+          description: Warna pemilik foto bila galeri per varian (opsional).
+          example: Black
+    Product:
+      type: object
+      required: [id, name, price, currency, description, variants, images]
+      properties:
+        id:
+          type: string
+          pattern: '^[a-z0-9](?:[a-z0-9-]{1,48}[a-z0-9])?$'
+          maxLength: 50
+          example: mw75-tumi
+        name:
+          type: string
+          minLength: 3
+          maxLength: 120
+          example: MW75 TUMI
+        price:
+          type: number
+          minimum: 0
+          multipleOf: 0.01
+          description: Harga dalam USD (angka, bukan string).
+          example: 750
+        currency:
+          type: string
+          description: Konstanta aplikasi (belum ada kolom DB).
+          enum: [USD]
+          example: USD
+        description:
+          type: string
+          minLength: 10
+          maxLength: 5000
+          example: TUMI x Master & Dynamic MW75 — headphone nirkabel dengan active noise-cancelling.
+        variants:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/Variant'
+        images:
+          type: array
+          minItems: 1
+          maxItems: 30
+          items:
+            $ref: '#/components/schemas/Image'
+    ProductSummary:
+      type: object
+      required: [id, name, price, currency]
+      properties:
+        id:
+          type: string
+          example: mw75-tumi
+        name:
+          type: string
+          example: MW75 TUMI
+        price:
+          type: number
+          example: 750
+        currency:
+          type: string
+          example: USD
+    ProductInput:
+      type: object
+      additionalProperties: false
+      required: [id, name, price, description, variants, images]
+      description: |
+        Body untuk `POST` dan `PUT` (full-replace).
+        Untuk `PUT`, `id` wajib **sama persis** dengan `id` di path.
+      properties:
+        id:
+          type: string
+          pattern: '^[a-z0-9](?:[a-z0-9-]{1,48}[a-z0-9])?$'
+          maxLength: 50
+          example: mw75-tumi-air
+        name:
+          type: string
+          minLength: 3
+          maxLength: 120
+          example: MW75 TUMI Air
+        price:
+          type: number
+          minimum: 0
+          multipleOf: 0.01
+          example: 650
+        description:
+          type: string
+          minLength: 10
+          maxLength: 5000
+          example: Varian ringan MW75 dengan baterai hingga 30 jam.
+        variants:
+          type: array
+          minItems: 1
+          maxItems: 20
+          description: Wajib minimal 1; `color` unik dalam satu produk.
+          items:
+            $ref: '#/components/schemas/Variant'
+        images:
+          type: array
+          minItems: 1
+          maxItems: 30
+          items:
+            $ref: '#/components/schemas/Image'
+    ProductEnvelope:
+      type: object
+      required: [data]
+      description: Envelope sukses untuk respons tunggal.
+      properties:
+        data:
+          $ref: '#/components/schemas/Product'
+      example:
+        data:
+          id: mw75-tumi
+          name: MW75 TUMI
+          price: 750
+          currency: USD
+          description: TUMI x Master & Dynamic MW75 — headphone nirkabel dengan active noise-cancelling.
+          variants:
+            - color: Black
+              swatch: '#1b1b1b'
+              quantity: 12
+          images:
+            - url: /img/black-hero.png
+              alt: TUMI MW75 Black — three-quarter view
+              color: Black
+    CartInput:
+      type: object
+      additionalProperties: false
+      required: [cartToken, productId, color]
+      description: |
+        Body `POST /api/cart/items`. Item dengan `productId` + `color` sama akan digabung
+        (quantity dijumlah) selama tidak melebihi stok varian.
+      properties:
+        cartToken:
+          type: string
+          format: uuid
+          pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+          example: 550e8400-e29b-41d4-a716-446655440000
+        productId:
+          type: string
+          pattern: '^[a-z0-9](?:[a-z0-9-]{1,48}[a-z0-9])?$'
+          maxLength: 50
+          example: mw75-tumi
+        color:
+          type: string
+          minLength: 1
+          maxLength: 30
+          description: Warna varian — harus ada di `product_variants`.
+          example: Black
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 99
+          default: 1
+          example: 1
+    CartItemUpdate:
+      type: object
+      additionalProperties: false
+      required: [quantity]
+      description: Body `PATCH /api/cart/{cartToken}/items/{itemId}` — ganti jumlah (bukan increment).
+      properties:
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 99
+          example: 3
+    CartItem:
+      type: object
+      required: [id, productId, name, color, quantity, unitPrice, lineTotal]
+      properties:
+        id:
+          type: integer
+          description: Id baris `cart_items`.
+          example: 1
+        productId:
+          type: string
+          example: mw75-tumi
+        name:
+          type: string
+          description: Nama produk (join dari `products`).
+          example: MW75 TUMI
+        color:
+          type: string
+          example: Black
+        quantity:
+          type: integer
+          minimum: 1
+          example: 1
+        unitPrice:
+          type: number
+          description: Harga satuan dalam USD.
+          example: 750
+        lineTotal:
+          type: number
+          description: 'Hasil kali `unitPrice * quantity`.'
+          example: 750
+    Cart:
+      type: object
+      required: [cartToken, currency, count, subtotal, items]
+      properties:
+        cartToken:
+          type: string
+          format: uuid
+          example: 550e8400-e29b-41d4-a716-446655440000
+        currency:
+          type: string
+          enum: [USD]
+          example: USD
+        count:
+          type: integer
+          minimum: 0
+          description: Total jumlah item (Σ `quantity`) — dipakai badge cart di FE.
+          example: 2
+        subtotal:
+          type: number
+          description: Total harga seluruh item (USD).
+          example: 1500
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CartItem'
+    CartEnvelope:
+      type: object
+      required: [data]
+      description: Envelope sukses untuk operasi cart.
+      properties:
+        data:
+          $ref: '#/components/schemas/Cart'
+    OrderItem:
+      type: object
+      description: Snapshot baris produk saat pesanan dibuat (nama & harga tidak ikut berubah).
+      required: [id, productId, name, color, quantity, unitPrice, lineTotal]
+      properties:
+        id:
+          type: integer
+          description: Id baris `order_items`.
+          example: 1
+        productId:
+          type: string
+          example: mw75-tumi
+        name:
+          type: string
+          example: MW75 TUMI
+        color:
+          type: string
+          example: Black
+        quantity:
+          type: integer
+          minimum: 1
+          example: 2
+        unitPrice:
+          type: number
+          description: Harga satuan saat dipesan (USD).
+          example: 750
+        lineTotal:
+          type: number
+          example: 1500
+    Order:
+      type: object
+      required: [id, orderNumber, cartToken, status, currency, itemsCount, subtotal, total, items, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+          minimum: 1
+          example: 1
+        orderNumber:
+          type: string
+          description: Nomor unik tampilan — dibuat server (`MD-YYMMDD-XXXXXX`).
+          pattern: '^MD-[0-9]{6}-[0-9A-F]{4,6}$'
+          example: MD-261008-3F9C2A
+        cartToken:
+          type: string
+          format: uuid
+          description: Cart token pembeli (pemilik pesanan).
+          example: 550e8400-e29b-41d4-a716-446655440000
+        status:
+          type: string
+          enum: [pending, paid, shipped, delivered, cancelled]
+          example: pending
+        currency:
+          type: string
+          enum: [USD]
+          example: USD
+        customerName:
+          type: string
+          nullable: true
+          maxLength: 80
+          example: Budi Santoso
+        email:
+          type: string
+          format: email
+          nullable: true
+          example: budi@example.com
+        note:
+          type: string
+          nullable: true
+          maxLength: 500
+          example: null
+        itemsCount:
+          type: integer
+          minimum: 0
+          description: Σ `quantity` seluruh item.
+          example: 2
+        subtotal:
+          type: number
+          example: 1500
+        total:
+          type: number
+          description: Kini sama dengan subtotal (biaya pengiriman belum ada kolomnya).
+          example: 1500
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-10-08T02:30:00.000Z'
+        updatedAt:
+          type: string
+          format: date-time
+          example: '2026-10-08T02:30:00.000Z'
+    OrderInput:
+      type: object
+      additionalProperties: false
+      required: [cartToken]
+      description: |
+        Body `POST /api/orders` (checkout). `customerName`/`email`/`note` opsional
+        tetapi bila dikirim harus valid (format email, dsb).
+      properties:
+        cartToken:
+          type: string
+          format: uuid
+          pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+          example: 550e8400-e29b-41d4-a716-446655440000
+        customerName:
+          type: string
+          minLength: 2
+          maxLength: 80
+          example: Budi Santoso
+        email:
+          type: string
+          format: email
+          maxLength: 120
+          example: budi@example.com
+        note:
+          type: string
+          maxLength: 500
+          example: Tolong dibungkus rapi
+    OrderUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: |
+        Body `PATCH /api/orders/{orderId}` — minimal satu field.
+        `status` memengaruhi stok (lihat deskripsi operasi).
+      properties:
+        status:
+          type: string
+          enum: [pending, paid, shipped, delivered, cancelled]
+          example: shipped
+        customerName:
+          type: string
+          minLength: 2
+          maxLength: 80
+          example: Budi Santoso
+        email:
+          type: string
+          format: email
+          maxLength: 120
+          example: budi@example.com
+        note:
+          type: string
+          maxLength: 500
+          example: Diubah via halaman Orders
+    OrderEnvelope:
+      type: object
+      required: [data]
+      description: Envelope sukses untuk operasi pesanan.
+      properties:
+        data:
+          $ref: '#/components/schemas/Order'
+    OrderListResponse:
+      type: object
+      required: [data, meta]
+      description: Envelope sukses untuk daftar pesanan.
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Order'
+        meta:
+          $ref: '#/components/schemas/Meta'
+    Meta:
+      type: object
+      required: [total, limit, offset]
+      properties:
+        total:
+          type: integer
+          minimum: 0
+          description: Jumlah total produk yang cocok dengan filter.
+          example: 1
+        limit:
+          type: integer
+          example: 10
+        offset:
+          type: integer
+          example: 0
+    ListResponse:
+      type: object
+      required: [data, meta]
+      description: Envelope sukses untuk list.
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductSummary'
+        meta:
+          $ref: '#/components/schemas/Meta'
+    ValidationErrorItem:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+          description: Path field yang gagal (dot-notation) atau `(root)` / `(body)`.
+          example: price
+        rule:
+          type: string
+          description: Kode aturan yang dilanggar (Zod issue code).
+          example: invalid_type
+        value:
+          description: Nilai yang ditolak (bisa `null`).
+          example: '750'
+        message:
+          type: string
+          description: Pesan kesalahan ramah (Bahasa Indonesia).
+          example: Harga harus berupa number
+    Problem:
+      type: object
+      description: |
+        **RFC 9457 Problem Details** — dikirim dengan `Content-Type: application/problem+json`.
+        Field inti (`type`, `title`, `status`, `detail`, `instance`) + ekstensi aplikasi (`code`, `errors`).
+      required: [type, title, status, detail, instance, code]
+      properties:
+        type:
+          type: string
+          description: Referensi URI (relatif) ke tipe masalah.
+          example: /problems/validation-error
+        title:
+          type: string
+          example: Validation Error
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+          example: 400
+        detail:
+          type: string
+          example: Parameter 'id' tidak valid
+        instance:
+          type: string
+          example: /api/products/MW75-TUMI
+        code:
+          type: string
+          description: Kode machine-readable.
+          pattern: '^[A-Z][A-Z0-9_]{2,49}$'
+          example: VALIDATION_ERROR
+        errors:
+          type: array
+          description: Detail per field — hanya untuk error yang terkait input.
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/ValidationErrorItem'
+  responses:
+    BadRequest:
+      description: '`400` — input tidak lolos validasi (slug, query, body, atau JSON rusak).'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: /problems/validation-error
+            title: Validation Error
+            status: 400
+            detail: Body tidak lolos validasi
+            instance: /api/products
+            code: VALIDATION_ERROR
+            errors:
+              - field: price
+                rule: invalid_type
+                value: '750'
+                message: Harga harus berupa number
+    ProductNotFound:
+      description: '`404` — slug valid tetapi produk tidak ada di database.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: /problems/product-not-found
+            title: Product Not Found
+            status: 404
+            detail: Product dengan id 'airpods-max' tidak ditemukan
+            instance: /api/products/airpods-max
+            code: PRODUCT_NOT_FOUND
+    VariantNotFound:
+      description: '`404` — produk ada tetapi warna varian tidak ditemukan di `product_variants`.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: /problems/variant-not-found
+            title: Variant Not Found
+            status: 404
+            detail: Varian 'Green' pada product 'mw75-tumi' tidak ditemukan
+            instance: /api/cart/items
+            code: VARIANT_NOT_FOUND
+    CartItemNotFound:
+      description: '`404` — `itemId` valid tetapi bukan milik `cartToken` ini.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: /problems/cart-item-not-found
+            title: Cart Item Not Found
+            status: 404
+            detail: Item cart dengan id '999' tidak ditemukan
+            instance: /api/cart/550e8400-e29b-41d4-a716-446655440000/items/999
+            code: CART_ITEM_NOT_FOUND
+    OrderNotFound:
+      description: '`404` — `orderId` valid tetapi pesanan tidak ada di database.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: /problems/order-not-found
+            title: Order Not Found
+            status: 404
+            detail: Pesanan dengan id '999' tidak ditemukan
+            instance: /api/orders/999
+            code: ORDER_NOT_FOUND
+    MethodNotAllowed:
+      description: '`405` — path dikenal, method di luar daftar. Selalu disertai header `Allow`.'
+      headers:
+        Allow:
+          $ref: '#/components/headers/Allow'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: /problems/method-not-allowed
+            title: Method Not Allowed
+            status: 405
+            detail: Method 'PATCH' tidak didukung untuk resource ini.
+            instance: /api/products/mw75-tumi
+            code: METHOD_NOT_ALLOWED
+    Conflict:
+      description: '`409` — `id` sudah dipakai produk lain.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: /problems/duplicate-id
+            title: Duplicate Id
+            status: 409
+            detail: Product dengan id 'mw75-tumi' sudah ada
+            instance: /api/products
+            code: DUPLICATE_ID
+    InsufficientStock:
+      description: '`409` — jumlah item di cart melebihi stok varian (`variants[].quantity`).'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: /problems/insufficient-stock
+            title: Insufficient Stock
+            status: 409
+            detail: Stok 'Silver' untuk product 'mw75-tumi' tinggal 0 — jumlah di cart melebihi stok
+            instance: /api/cart/items
+            code: INSUFFICIENT_STOCK
+    UnsupportedMediaType:
+      description: '`415` — `Content-Type` bukan `application/json`.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: /problems/unsupported-media-type
+            title: Unsupported Media Type
+            status: 415
+            detail: Content-Type 'text/plain' tidak didukung — gunakan application/json
+            instance: /api/products
+            code: UNSUPPORTED_MEDIA_TYPE
+    PayloadTooLarge:
+      description: '`413` — body melebihi batas 100kb.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: /problems/payload-too-large
+            title: Payload Too Large
+            status: 413
+            detail: Ukuran body melebihi batas 100kb
+            instance: /api/products
+            code: PAYLOAD_TOO_LARGE
+    InternalError:
+      description: '`500` — exception tak terduga. Stacktrace tidak pernah dikirim ke client.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: /problems/internal-error
+            title: Internal Server Error
+            status: 500
+            detail: Terjadi kesalahan pada server
+            instance: /api/products/mw75-tumi
+            code: INTERNAL_ERROR
+    NoContent:
+      description: '`204` — produk terhapus; respons tanpa body.'

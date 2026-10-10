@@ -1,0 +1,33 @@
+{
+  "name": "api-produk",
+  "version": "1.0.0",
+  "private": true,
+  "description": "API Produk — Node.js + Express + MySQL + Swagger (OpenAPI 3.0)",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "db:migrate": "node scripts/run-sql.js db/migrations",
+    "db:seed": "node scripts/run-sql.js db/seed.sql",
+    "db:dev": "node scripts/dev-db.js",
+    "smoke": "node scripts/smoke.js",
+    "test:integration": "node scripts/integration.js",
+    "docs:openapi": "node scripts/validate-openapi.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "helmet": "^8.0.0",
+    "js-yaml": "^4.1.0",
+    "mysql2": "^3.12.0",
+    "swagger-ui-express": "^5.0.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "mysql-memory-server": "^1.17.0"
+  }
+}

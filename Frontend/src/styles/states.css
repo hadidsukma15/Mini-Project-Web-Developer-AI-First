@@ -1,0 +1,231 @@
+/* ==========================================================================
+   Status UI: loading skeleton · strip sumber data · halaman error API
+   (dipakai halaman detail 2 — src/main-api.js / src/app.js)
+   ========================================================================== */
+
+/* ---------- Loading skeleton ---------- */
+
+.loading__main {
+  padding-bottom: var(--section-padding-y);
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #eceae7 25%, #f6f5f3 37%, #eceae7 63%);
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.4s ease infinite;
+  border-radius: var(--radius-sm);
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+
+.skeleton--crumb {
+  width: 220px;
+  height: 14px;
+  margin-top: var(--space-5);
+  margin-bottom: var(--space-5);
+}
+
+.skeleton--sm {
+  width: 35%;
+  height: 14px;
+}
+
+.skeleton--title {
+  width: 70%;
+  height: 40px;
+}
+
+.skeleton--line {
+  width: 100%;
+  height: 16px;
+}
+
+.skeleton--block {
+  height: 170px;
+}
+
+.skeleton--cta {
+  height: 52px;
+}
+
+.skeleton--stage {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+}
+
+.skeleton__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.loading__endpoint {
+  margin-top: var(--space-5);
+  font-size: var(--fs-small);
+  color: var(--color-text-muted);
+}
+
+.loading__endpoint code {
+  display: inline-block;
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+/* ---------- Strip sumber data (hardcode / API / fallback) ---------- */
+
+.source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--container-pad);
+  background: var(--color-surface);
+  border-block: 1px solid var(--color-border);
+  font-size: var(--fs-small);
+}
+
+.source__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.source--hardcode .source__dot {
+  background: #b45309;
+}
+
+.source--api .source__dot {
+  background: var(--color-success);
+}
+
+.source--fallback .source__dot {
+  background: var(--color-danger);
+}
+
+.source__text {
+  font-weight: var(--fw-medium);
+}
+
+.source__endpoint {
+  padding: 2px var(--space-2);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-xs);
+}
+
+.source__link {
+  margin-left: auto;
+  color: var(--color-text);
+  font-weight: var(--fw-medium);
+}
+
+.source__link:hover {
+  text-decoration: none;
+}
+
+.source__note {
+  flex-basis: 100%;
+  color: var(--color-text-muted);
+}
+
+.source__details {
+  flex-basis: 100%;
+}
+
+.source__details summary {
+  cursor: pointer;
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+}
+
+.source__details summary:hover {
+  color: var(--color-text);
+}
+
+.source__details pre {
+  max-height: 260px;
+  margin-top: var(--space-2);
+  padding: var(--space-4);
+  overflow: auto;
+  background: var(--color-surface-dark);
+  color: #f2f2f2;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* ---------- Halaman error API (4xx problem+json) ---------- */
+
+.error-view {
+  min-height: 46vh;
+  padding-bottom: var(--section-padding-y);
+}
+
+.error-view .breadcrumb {
+  padding-top: var(--space-5);
+}
+
+.error-view__title {
+  margin-top: var(--space-2);
+  font-size: var(--fs-h2);
+}
+
+.error-view__detail {
+  max-width: 62ch;
+  margin-top: var(--space-3);
+  color: var(--color-text-muted);
+}
+
+.error-view__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.error-view__meta code {
+  padding: 2px var(--space-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+}
+
+.error-view__list {
+  margin-top: var(--space-4);
+  display: grid;
+  gap: var(--space-2);
+  font-size: var(--fs-small);
+  color: var(--color-danger);
+}
+
+.error-view__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+}
+
+/* ---------- Reduced motion ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+    background: var(--color-surface);
+  }
+}
+
+.source--error .source__dot {
+  background: var(--color-danger);
+}

@@ -1,0 +1,57 @@
+# ============================================================================
+# MySQL 8 — API Produk (backend `api-produk/`)
+#
+# Dipakai OLEH KEDUANYA:
+#   Backend : koneksi pool dari `.env` (DB_HOST/DB_PORT/DB_USER/DB_PASS/DB_NAME)
+#   Frontend: tidak perlu koneksi DB langsung — cukup panggil API Express
+#             (FE → http://localhost:3000 → container ini)
+#
+# Cara pakai (dari folder `api-produk/`):
+#   1. cp .env.example .env          # sekali saja — nilai DB harus sama dengan
+#                                    # MYSQL_* di file ini
+#   2. docker compose up -d          # start MySQL
+#   3. docker compose ps             # tunggu status "healthy"
+#   4. npm run db:migrate            # buat tabel (db/migrations/001_init.sql)
+#   5. npm run db:seed               # isi data (db/seed.sql)
+#   6. npm run dev                   # jalankan API → Swagger di /api-docs
+#
+# Reset data (tanpa buang container):  docker compose exec mysql \
+#   mysql -uroot -p$MYSQL_ROOT_PASSWORD -e "DROP DATABASE api_produk; CREATE DATABASE api_produk;"
+# Reset total (buang volume):          docker compose down -v
+# ============================================================================
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: api-produk-mysql
+    restart: unless-stopped
+    # Nilai default SAMA dengan `.env.example` — ubah di `.env`, file ini
+    # otomatis membacanya (interpolasi ${VAR:-default}).
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_secret}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-api_produk}
+      MYSQL_USER: ${DB_USER:-app}
+      MYSQL_PASSWORD: ${DB_PASS:-app_secret}
+    ports:
+      # Hanya loopback (127.0.0.1) — TIDAK terlihat dari jaringan lokal/internet.
+      # API Express (host) tetap bisa memakai DB_HOST=localhost.
+      # Bila suatu saat backend ikut di-container, pindahkan ke network internal
+      # compose (service `app` → db:3306) — jangan membuka 0.0.0.0.
+      - "127.0.0.1:${DB_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'mysqladmin ping -h 127.0.0.1 -uroot -p"$${MYSQL_ROOT_PASSWORD}" --silent',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 25s
+
+volumes:
+  mysql_data:
+    # Data tetap ada walau container dihapus; `docker compose down -v` untuk hapus
+    name: api-produk-mysql-data
